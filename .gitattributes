@@ -1,0 +1,9 @@
+# Always use LF line endings, including on Windows checkouts
+# (where core.autocrlf would otherwise convert to CRLF and fail the formatter check).
+* text=auto eol=lf
+
+# Binary files: never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.db binary
