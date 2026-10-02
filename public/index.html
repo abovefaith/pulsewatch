@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pulsewatch Status</title>
+    <meta name="description" content="Live service status powered by Pulsewatch" />
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --surface: #ffffff;
+        --border: #e3e6ea;
+        --text: #16181d;
+        --muted: #646b78;
+        --up: #1f9d55;
+        --degraded: #d97706;
+        --down: #dc2626;
+        --paused: #8b93a1;
+        --empty: #e3e6ea;
+        --radius: 12px;
+        color-scheme: light dark;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0e1013;
+          --surface: #171a1f;
+          --border: #272b33;
+          --text: #e9ecf1;
+          --muted: #9aa2af;
+          --empty: #2a2f38;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      main { max-width: 880px; margin: 0 auto; padding: 40px 16px 64px; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+      h1 { font-size: 20px; margin: 0; display: flex; align-items: center; gap: 10px; }
+      .logo { width: 22px; height: 22px; color: var(--up); }
+      .live { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+      .live::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--paused); }
+      .live.connected::before { background: var(--up); animation: pulse 2s infinite; }
+      @keyframes pulse { 50% { opacity: 0.35; } }
+
+      .banner {
+        border-radius: var(--radius);
+        padding: 18px 20px;
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 24px;
+        background: var(--paused);
+      }
+      .banner.operational { background: var(--up); }
+      .banner.degraded { background: var(--degraded); }
+      .banner.outage { background: var(--down); }
+      .banner small { display: block; font-weight: 400; opacity: 0.9; margin-top: 2px; }
+
+      .list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+      .monitor { padding: 18px 20px; border-top: 1px solid var(--border); transition: background 0.6s; }
+      .monitor:first-child { border-top: 0; }
+      .monitor.flash { background: color-mix(in srgb, var(--up) 8%, transparent); transition: none; }
+      .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+      .name { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+      .meta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+      .bars { display: flex; gap: 3px; height: 30px; margin-top: 12px; }
+      .bar { flex: 1; border-radius: 3px; background: var(--empty); }
+      .incident { margin-top: 10px; font-size: 13px; color: var(--down); }
+      .empty { padding: 48px 20px; text-align: center; color: var(--muted); }
+      .empty code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
+      footer { margin-top: 24px; font-size: 13px; color: var(--muted); text-align: center; }
+      footer a { color: inherit; }
+      .up { background: var(--up); }
+      .degraded { background: var(--degraded); }
+      .down { background: var(--down); }
+      .paused, .pending { background: var(--paused); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>
+          <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 12h4l3-8 4 16 3-8h6" />
+          </svg>
+          Pulsewatch
+        </h1>
+        <span class="live" id="live">Connecting…</span>
+      </header>
+
+      <div class="banner" id="banner">Loading status…</div>
+      <section class="list" id="monitors" aria-live="polite"></section>
+
+      <footer>Updated <span id="updated">—</span> · <a href="/metrics">metrics</a></footer>
+    </main>
+
+    <script type="module">
+      const $ = (id) => document.getElementById(id);
+      const BANNER_TEXT = {
+        operational: 'All systems operational',
+        degraded: 'Some systems are experiencing issues',
+        outage: 'Service outage in progress',
+      };
+      const STATE_LABEL = { up: 'Operational', degraded: 'Degraded', down: 'Down', paused: 'Paused', pending: 'Pending first check' };
+
+      const escapeHtml = (value) =>
+        String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+      const timeAgo = (iso) => {
+        if (!iso) return 'never';
+        const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+        if (seconds < 60) return `${seconds}s ago`;
+        if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+        return `${Math.round(seconds / 3600)}h ago`;
+      };
+
+      function renderBars(recent) {
+        const slots = 30;
+        const padding = Array.from({ length: slots - recent.length }, () => '<span class="bar"></span>');
+        const bars = recent.map((c) => {
+          const title = `${new Date(c.checkedAt).toLocaleString()} — ${c.ok ? `${c.latencyMs ?? '?'} ms` : 'failed'}`;
+          return `<span class="bar ${c.ok ? 'up' : 'down'}" title="${escapeHtml(title)}"></span>`;
+        });
+        return `<div class="bars" role="img" aria-label="Last ${recent.length} checks">${padding.join('')}${bars.join('')}</div>`;
+      }
+
+      function render(status) {
+        const banner = $('banner');
+        banner.className = `banner ${status.overall}`;
+        const down = status.monitors.filter((m) => m.state === 'down').length;
+        banner.innerHTML = `${BANNER_TEXT[status.overall]}<small>${status.monitors.length} monitors${down ? ` · ${down} down` : ''}</small>`;
+
+        if (status.monitors.length === 0) {
+          $('monitors').innerHTML = `<div class="empty">No monitors yet. Create one with <code>POST /api/monitors</code> or run <code>npm run seed</code>.</div>`;
+        } else {
+          $('monitors').innerHTML = status.monitors
+            .map((m) => {
+              const uptime = m.uptime24h === null ? '—' : `${m.uptime24h.toFixed(2)}%`;
+              const latency = m.latencyMs === null ? '' : ` · ${Math.round(m.latencyMs)} ms`;
+              const incident = m.openIncident
+                ? `<div class="incident">Incident since ${new Date(m.openIncident.startedAt).toLocaleTimeString()}: ${escapeHtml(m.openIncident.cause)}</div>`
+                : '';
+              return `<article class="monitor" data-id="${m.id}">
+                <div class="row">
+                  <span class="name"><span class="dot ${m.state}"></span>${escapeHtml(m.name)}</span>
+                  <span class="meta">${STATE_LABEL[m.state]} · ${uptime} (24h)${latency} · ${timeAgo(m.lastCheckedAt)}</span>
+                </div>
+                ${renderBars(m.recent)}
+                ${incident}
+              </article>`;
+            })
+            .join('');
+        }
+        $('updated').textContent = new Date(status.generatedAt).toLocaleTimeString();
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch('/api/status');
+          if (response.ok) render(await response.json());
+        } catch (error) {
+          console.warn('Status refresh failed', error);
+        }
+      }
+
+      // Coalesce bursts of events (many monitors finishing at once) into one refresh.
+      let refreshTimer;
+      const scheduleRefresh = () => {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refresh, 250);
+      };
+
+      const flash = (monitorId) => {
+        const el = document.querySelector(`[data-id="${CSS.escape(monitorId)}"]`);
+        if (!el) return;
+        el.classList.add('flash');
+        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('flash')));
+      };
+
+      const events = new EventSource('/api/events');
+      events.addEventListener('open', () => {
+        $('live').textContent = 'Live';
+        $('live').classList.add('connected');
+        refresh();
+      });
+      events.addEventListener('error', () => {
+        $('live').textContent = 'Reconnecting…';
+        $('live').classList.remove('connected');
+      });
+      events.addEventListener('check', (e) => {
+        scheduleRefresh();
+        setTimeout(() => flash(JSON.parse(e.data).monitorId), 300);
+      });
+      events.addEventListener('incident', scheduleRefresh);
+
+      refresh();
+      setInterval(refresh, 30_000); // safety net if the stream silently stalls
+    </script>
+  </body>
+</html>

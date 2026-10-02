@@ -1,0 +1,41 @@
+{
+  "name": "pulsewatch",
+  "version": "1.0.0",
+  "description": "Self-hosted uptime monitoring service: scheduled HTTP checks, incident detection, signed webhooks, live SSE status page and Prometheus metrics. Built on Node.js 24 with native TypeScript.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Faith Kawira",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "seed": "node --env-file-if-exists=.env scripts/seed.ts",
+    "test": "node --test --test-reporter=spec \"test/**/*.test.ts\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" \"test/**/*.test.ts\"",
+    "typecheck": "tsc",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "keywords": [
+    "nodejs",
+    "uptime",
+    "monitoring",
+    "fastify",
+    "sqlite",
+    "sse",
+    "typescript"
+  ],
+  "dependencies": {
+    "fastify": "^5.12.5",
+    "pino": "^10.3.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
+  }
+}

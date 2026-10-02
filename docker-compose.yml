@@ -1,0 +1,16 @@
+services:
+  pulsewatch:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      API_KEY: ${API_KEY:?Set API_KEY in your shell or a .env file}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      LOG_LEVEL: info
+    volumes:
+      - pulsewatch-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+volumes:
+  pulsewatch-data:
